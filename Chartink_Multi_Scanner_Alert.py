@@ -43,7 +43,7 @@ SEEN_FILE = "seen_stocks.json"
 def is_market_hours():
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist)
-    return now.weekday() < 5 and 9 <= now.hour < 16
+    return now.weekday() < 5 and 9 <= now.hour < 23
 
 def load_seen():
     today = datetime.now().strftime("%Y-%m-%d")
