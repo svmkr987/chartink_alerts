@@ -2,7 +2,7 @@ name: Run Chartink Alerts
 
 on:
   schedule:
-    - cron: "*/5 * * * 1-5"  # Every 5 mins on weekdays (Mon–Fri)
+    - cron: "*/15 * * * 1-5"  # Every 5 mins on weekdays (Mon–Fri)
   workflow_dispatch:
 
 jobs:
