@@ -74,40 +74,36 @@ if __name__ == "__main__":
 
     seen_stocks = {scanner['SCREENER_NAME']: set() for scanner in SCANNERS}
 
-    while True:
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print(f"🕒 Checking at {current_time}")
+    now = datetime.now()
+    current_time = now.strftime("%H:%M:%S")
+    print(f"🕒 Checking at {current_time}")
 
-        for scanner in SCANNERS:
-            name = scanner['SCREENER_NAME']
-            url = scanner['SCREENER_URL']
-            clause = scanner['scan_clause']
-            print(f"🔍 {name}")
-            df = chartink_scraper(url, clause)
+    for scanner in SCANNERS:
+        name = scanner['SCREENER_NAME']
+        url = scanner['SCREENER_URL']
+        clause = scanner['scan_clause']
+        print(f"🔍 {name}")
+        df = chartink_scraper(url, clause)
 
+        if df.empty:
+            print("ℹ️ No breakout stocks right now.\n")
+        else:
+            new_stocks = [row for _, row in df.iterrows() if row['nsecode'] not in seen_stocks[name]]
+            if new_stocks:
+                lines = []
+                for row in new_stocks:
+                    code = row['nsecode']
+                    company_name = row['name']
+                    price = row['close']
+                    pct   = row['per_chg']
+                    vol   = row['volume']
+                    lines.append(f"💰 {code} ({company_name})\nCMP: ₹{price:.2f}   Vol: {vol:,}   Per.Chng: {pct:+.2f}% \n")
+                    seen_stocks[name].add(code)
 
-            if df.empty:
-                print("ℹ️ No breakout stocks right now.\n")
+                message = f"📈 Chartink Alert: {name}\n\n"+"\n"
+                message += "\n".join(lines)
+                send_telegram_message(message)
+
+                print(f"✅ Sent alert for: {', '.join([r['nsecode'] for r in new_stocks])}\n")
             else:
-                new_stocks = [row for _, row in df.iterrows() if row['nsecode'] not in seen_stocks[name]]
-                if new_stocks:
-                    lines = []
-                    for row in new_stocks:
-                        code = row['nsecode']
-                        company_name = row['name']
-                        price = row['close']
-                        pct   = row['per_chg']
-                        vol   = row['volume']
-                        lines.append(f"💰 {code} ({company_name})\nCMP: ₹{price:.2f}   Vol: {vol:,}   Per.Chng: {pct:+.2f}% \n")
-                        seen_stocks[name].add(code)
-
-                    message = f"📈 Chartink Alert: {name}\n\n"+"\n"
-                    message += "\n".join(lines)
-                    send_telegram_message(message)
-
-                    print(f"✅ Sent alert for: {', '.join([r['nsecode'] for r in new_stocks])}\n")
-                else:
-                    print("⚠️ No new stocks since last check.\n")
-
-        time.sleep(SLEEP_INTERVAL)
+                print("⚠️ No new stocks since last check.\n")
