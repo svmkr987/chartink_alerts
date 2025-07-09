@@ -3,15 +3,14 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup as bs
 from datetime import datetime
+import json
+import os
+import pytz
 
 # === CONFIG ===
 
 BOT_TOKEN = '8127636976:AAEb4awyMSnNa2j-gSXCrmeDhDkNlf3IV-I'
-CHAT_IDS = ['6680805526','-1002796457494']  # You can add multiple chat IDs here
-
-#SLEEP_INTERVAL = 60  # 60 sec = 1 min
-SLEEP_INTERVAL = 300  # 300 sec = 5 min
-#SLEEP_INTERVAL = 900  # 900 sec = 15 min
+CHAT_IDS = ['6680805526', '-1002796457494']
 
 SCANNERS = [
     {
@@ -35,10 +34,34 @@ SCANNERS = [
             'scan_clause': '( {33489} ( ( {33489} ( ( {33489} ( latest volume > ( 2 * latest "sum( close  *  volume, 20 ) / sum( volume ,20 )" ) and latest close > ( 0.98 * latest high ) and latest close > 1 day ago close and latest rsi( 14 ) > 60 and latest cci( 14 ) > 110 and latest adx( 14 ) > 20 and latest volume >= 1000000 and latest adx di positive( 14 ) >= latest adx di negative( 14 ) and latest close > 1 day ago max( 20 , latest high ) and 1 day ago  close <= 2 day ago  max( 20 , latest high ) ) ) or( {33489} ( ( latest high - latest low ) > ( 1 day ago high - 1 day ago low ) and( latest high - latest low ) > ( 2 days ago high - 2 days ago low ) and( latest high - latest low ) > ( 3 days ago high - 3 days ago low ) and latest rsi( 14 ) > 60 and latest cci( 20 ) > 110 and latest adx( 14 ) > 20 and latest close > latest open and latest close > 1 day ago close and weekly close > weekly open and 1 day ago volume > 1000000 and 1 day ago ema( latest close , 20 ) > 1 day ago ema( 1 day ago close , 50 ) and latest vwap > 1 day ago vwap and latest vwap > 2 days ago vwap and latest vwap > 3 days ago vwap and [=1] 5 minute volume > 10000 and [=1] 10 minute high >= latest sma( latest close , 20 ) and [=2] 5 minute high >= latest sma( latest close , 20 ) and latest adx di positive( 14 ) > latest adx di negative( 14 ) and latest close > 1 day ago max( 20 , latest high ) and 1 day ago  close <= 2 day ago  max( 20 , latest high ) ) ) ) ) ) )'
         }
     }
-    #You can add more scanners here
 ]
 
-# === SEND TELEGRAM ALERT ===
+# === HELPERS ===
+
+SEEN_FILE = "seen_stocks.json"
+
+def is_market_hours():
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    return now.weekday() < 5 and 9 <= now.hour < 16
+
+def load_seen():
+    today = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f:
+            data = json.load(f)
+            if data.get("date") == today:
+                return data.get("seen_stocks", {})
+    return {}
+
+def save_seen(seen_data):
+    today = datetime.now().strftime("%Y-%m-%d")
+    with open(SEEN_FILE, "w") as f:
+        json.dump({
+            "date": today,
+            "seen_stocks": seen_data
+        }, f)
+
 def send_telegram_message(msg):
     try:
         for chat_id in CHAT_IDS:
@@ -50,8 +73,6 @@ def send_telegram_message(msg):
     except Exception as e:
         print("❌ Telegram exception:", e)
 
-
-# === FETCH FROM CHARTINK ===
 def chartink_scraper(url, scan_clause):
     try:
         with requests.Session() as s:
@@ -67,43 +88,53 @@ def chartink_scraper(url, scan_clause):
         print("❌ Failed to fetch Chartink data:", e)
         return pd.DataFrame()
 
+# === MAIN ===
 
-# === MAIN LOOP ===
 if __name__ == "__main__":
-    print("🚀 Chartink Scanner Started with regular refresh")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"🕒 Script running at {now}")
 
-    seen_stocks = {scanner['SCREENER_NAME']: set() for scanner in SCANNERS}
+    if not is_market_hours():
+        print("⏳ Outside market hours. Skipping.")
+        exit()
 
-    now = datetime.now()
-    current_time = now.strftime("%H:%M:%S")
-    print(f"🕒 Checking at {current_time}")
+    seen_raw = load_seen()
+    seen_stocks = {}
+
+    for scanner in SCANNERS:
+        name = scanner['SCREENER_NAME']
+        seen_stocks[name] = set(seen_raw.get(name, []))
 
     for scanner in SCANNERS:
         name = scanner['SCREENER_NAME']
         url = scanner['SCREENER_URL']
         clause = scanner['scan_clause']
-        print(f"🔍 {name}")
+        print(f"🔍 Scanning: {name}")
         df = chartink_scraper(url, clause)
 
         if df.empty:
-            print("ℹ️ No breakout stocks right now.\n")
+            print("ℹ️ No breakout stocks.")
+            continue
+
+        new_stocks = [row for _, row in df.iterrows() if row['nsecode'] not in seen_stocks[name]]
+
+        if new_stocks:
+            lines = []
+            for row in new_stocks:
+                code = row['nsecode']
+                name_ = row['name']
+                price = row['close']
+                pct   = row['per_chg']
+                vol   = row['volume']
+                lines.append(f"💰 {code} ({name_})\nCMP: ₹{price:.2f}   Vol: {vol:,}   Per.Chng: {pct:+.2f}% \n")
+                seen_stocks[name].add(code)
+
+            message = f"📈 Chartink Alert: {scanner['SCREENER_NAME']}\n\n" + "\n".join(lines)
+            send_telegram_message(message)
+            print("✅ Alert sent.")
         else:
-            new_stocks = [row for _, row in df.iterrows() if row['nsecode'] not in seen_stocks[name]]
-            if new_stocks:
-                lines = []
-                for row in new_stocks:
-                    code = row['nsecode']
-                    company_name = row['name']
-                    price = row['close']
-                    pct   = row['per_chg']
-                    vol   = row['volume']
-                    lines.append(f"💰 {code} ({company_name})\nCMP: ₹{price:.2f}   Vol: {vol:,}   Per.Chng: {pct:+.2f}% \n")
-                    seen_stocks[name].add(code)
+            print("⚠️ No new stocks.\n")
 
-                message = f"📈 Chartink Alert: {name}\n\n"+"\n"
-                message += "\n".join(lines)
-                send_telegram_message(message)
-
-                print(f"✅ Sent alert for: {', '.join([r['nsecode'] for r in new_stocks])}\n")
-            else:
-                print("⚠️ No new stocks since last check.\n")
+    # Save updated seen stocks
+    save_ready = {k: list(v) for k, v in seen_stocks.items()}
+    save_seen(save_ready)
