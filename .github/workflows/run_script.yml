@@ -1,16 +1,12 @@
 name: Run Chartink Alerts
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # Every 5 minutes (UTC)
+    - cron: "*/5 * * * 1-5"  # Every 5 mins on weekdays (Mon–Fri)
+  workflow_dispatch:
 
 jobs:
-  run-script:
+  run-chartink-alerts:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,5 +23,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Chartink Multi Scanner Alert script
+      - name: Run alert script
         run: python Chartink_Multi_Scanner_Alert.py
